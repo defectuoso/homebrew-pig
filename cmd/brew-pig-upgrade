@@ -1,0 +1,73 @@
+#!/bin/bash
+# brew pig-upgrade — actualiza la fórmula de PiG a la última release publicada.
+#
+# Qué hace:
+#   1. Lee la última release de github.com/MichaelKinsy/PiG
+#   2. Toma los sha256 oficiales del asset EVIDENCE-SHA256SUMS del release
+#   3. Parchea Formula/pig.rb (version + los dos sha256)
+#   4. Verifica: brew upgrade + brew test
+#   5. Solo si todo pasa: commit + push al repo del tap
+#
+# Si algo falla, la fórmula vuelve a su último estado commiteado.
+set -euo pipefail
+
+TAP="defectuoso/pig"
+FORMULA="pig"
+UPSTREAM="MichaelKinsy/PiG"
+
+die() { echo "brew pig-upgrade: $*" >&2; exit 1; }
+
+TAP_DIR="$(brew --repository "$TAP")" || die "el tap $TAP no está instalado"
+FORMULA_PATH="$TAP_DIR/Formula/$FORMULA.rb"
+[ -f "$FORMULA_PATH" ] || die "no encuentro $FORMULA_PATH"
+
+# ── 1. Última versión publicada ───────────────────────────────────────────────
+TAG="$(curl -fsSL "https://api.github.com/repos/$UPSTREAM/releases/latest" \
+  | sed -n 's/.*"tag_name": *"\(v[0-9.]*\)".*/\1/p')"
+[ -n "$TAG" ] || die "no pude leer la última release de $UPSTREAM"
+VERSION="${TAG#v}"
+
+# ── 2. Checksums oficiales del release ───────────────────────────────────────
+SUMS="$(curl -fsSL "https://github.com/$UPSTREAM/releases/download/$TAG/EVIDENCE-SHA256SUMS")"
+ARM="$(awk -v f="pig-$VERSION-darwin-arm64.tar.gz" '$2==f{print $1}' <<<"$SUMS")"
+AMD="$(awk -v f="pig-$VERSION-darwin-amd64.tar.gz" '$2==f{print $1}' <<<"$SUMS")"
+[ -n "$ARM" ] && [ -n "$AMD" ] || die "no encontré los sha256 de $VERSION en EVIDENCE-SHA256SUMS"
+
+# ── 3. ¿Ya está todo al día? ─────────────────────────────────────────────────
+CURRENT="$(sed -n 's/^  version "\(.*\)"/\1/p' "$FORMULA_PATH")"
+if [ "$CURRENT" = "$VERSION" ] \
+   && brew list --versions "$FORMULA" 2>/dev/null | grep -q "$VERSION" \
+   && git -C "$TAP_DIR" diff --quiet -- "$FORMULA_PATH"; then
+  echo "pig $VERSION ya está instalado y publicado: nada que hacer."
+  exit 0
+fi
+
+echo "==> Actualizando fórmula: ${CURRENT:-?} -> $VERSION"
+
+# ── 4. Parchear la fórmula (versión + los dos sha256) ─────────────────────────
+ARM="$ARM" AMD="$AMD" VERSION="$VERSION" perl -0777 -pi -e '
+  s/version "[^"]*"/version "$ENV{VERSION}"/;
+  s/(darwin-arm64\.tar\.gz"\n\s+sha256 ")[0-9a-f]+/$1$ENV{ARM}/;
+  s/(darwin-amd64\.tar\.gz"\n\s+sha256 ")[0-9a-f]+/$1$ENV{AMD}/;
+' "$FORMULA_PATH"
+
+# Ante cualquier fallo posterior, restaurar la fórmula al último commit.
+revert() { git -C "$TAP_DIR" checkout -- "$FORMULA_PATH"; }
+trap 'revert' ERR
+
+# ── 5. Verificar: instalar y testear la nueva versión ─────────────────────────
+HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade "$TAP/$FORMULA"
+HOMEBREW_NO_AUTO_UPDATE=1 brew test "$TAP/$FORMULA"
+
+trap - ERR
+
+# ── 6. Publicar ──────────────────────────────────────────────────────────────
+git -C "$TAP_DIR" add "$FORMULA_PATH"
+if git -C "$TAP_DIR" diff --cached --quiet; then
+  echo "La fórmula ya estaba en $VERSION: nada que commitear."
+else
+  git -C "$TAP_DIR" commit -m "pig $VERSION"
+fi
+git -C "$TAP_DIR" push
+
+echo "✅ pig $VERSION instalado, testeado y publicado en $TAP."

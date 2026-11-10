@@ -12,33 +12,32 @@ brew install defectuoso/pig/pig
 > Usar siempre el nombre completo `defectuoso/pig/pig`: este `pig` hace *shadowing*
 > del `pig` de homebrew-core (software distinto).
 
-## Actualizar la fórmula (ej. a 0.6.0)
+## Actualizar a una nueva versión
 
-1. **Comprobar la última versión** publicada:
-   ```bash
-   brew livecheck pig        # muestra "actual ==> última"
-   ```
+```bash
+brew pig-upgrade
+```
 
-2. **Editar** `Formula/pig.rb`:
-   - `version "0.6.0"`
-   - Los dos `sha256` (darwin-arm64 y darwin-amd64), tomados del asset
-     `EVIDENCE-SHA256SUMS` del release (o `shasum -a 256` sobre cada tarball).
-   - No tocar `def install`: el tarball lleva el binario en un subdirectorio
-     (`pig-<versión>-darwin-<arch>/`), pero Homebrew entra automáticamente en el
-     único directorio de primer nivel, así que `bin.install "pig"` es correcto.
-   - El `test` usa `version.to_s`, no hay que tocarlo.
+Ese comando (el script `cmd/brew-pig-upgrade` de este tap) hace todo el proceso:
 
-3. **Verificar en local:**
-   ```bash
-   HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade defectuoso/pig/pig
-   HOMEBREW_NO_AUTO_UPDATE=1 brew test defectuoso/pig/pig
-   ```
+1. Lee la última release publicada de `MichaelKinsy/PiG`
+2. Toma los `sha256` oficiales del asset `EVIDENCE-SHA256SUMS` del release
+3. Parchea `Formula/pig.rb` (`version` + los dos `sha256`)
+4. Verifica: `brew upgrade` + `brew test`
+5. Solo si todo pasa: commit + push a este repo
 
-4. **Publicar** (los demás Macs se actualizan con `brew update` + `brew upgrade`):
-   ```bash
-   cd /opt/homebrew/Library/Taps/defectuoso/homebrew-pig
-   git commit -am "pig 0.6.0" && git push
-   ```
+Si algo falla (checksum, layout del tarball, test), la fórmula se restaura a su
+último commit y no se publica nada. En los demás Macs: `brew update && brew upgrade
+defectuoso/pig/pig`.
+
+### Procedimiento manual (por si el script falla)
+
+Editar `Formula/pig.rb`: `version` + los dos `sha256` (de `EVIDENCE-SHA256SUMS`),
+verificar con `HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade defectuoso/pig/pig` y
+`brew test defectuoso/pig/pig`, y commitear con `git commit -am "pig <versión>" && git push`.
+No tocar `def install`: el tarball lleva el binario en un subdirectorio
+(`pig-<versión>-darwin-<arch>/`), pero Homebrew entra automáticamente en el único
+directorio de primer nivel, así que `bin.install "pig"` es correcto.
 
 ## Notas del tap
 
@@ -49,5 +48,3 @@ brew install defectuoso/pig/pig
   `osxkeychain`, pero **no tiene scope `workflow`**: no añadir ficheros bajo
   `.github/workflows/` por push (GitHub los rechaza). Si se quieren workflows,
   crearlos desde la web de GitHub o ampliar el scope del token.
-- `brew update` ahora sí actualiza este tap (antes el repo no tenía remote y
-  el histórico nunca se había publicado).
