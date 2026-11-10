@@ -34,10 +34,13 @@ AMD="$(awk -v f="pig-$VERSION-darwin-amd64.tar.gz" '$2==f{print $1}' <<<"$SUMS")
 [ -n "$ARM" ] && [ -n "$AMD" ] || die "no encontré los sha256 de $VERSION en EVIDENCE-SHA256SUMS"
 
 # ── 3. ¿Ya está todo al día? ─────────────────────────────────────────────────
+# Solo salimos si la fórmula está en la última versión, está instalada y no
+# queda ningún commit sin publicar (p. ej. un push anterior que falló).
 CURRENT="$(sed -n 's/^  version "\(.*\)"/\1/p' "$FORMULA_PATH")"
+UNPUSHED="$(git -C "$TAP_DIR" log origin/main..HEAD 2>/dev/null || true)"
 if [ "$CURRENT" = "$VERSION" ] \
    && brew list --versions "$FORMULA" 2>/dev/null | grep -q "$VERSION" \
-   && git -C "$TAP_DIR" diff --quiet -- "$FORMULA_PATH"; then
+   && [ -z "$UNPUSHED" ]; then
   echo "pig $VERSION ya está instalado y publicado: nada que hacer."
   exit 0
 fi
